@@ -17,7 +17,7 @@ public class DolarService {
 
     private final GlobalConfigRepository configRepository;
     private final RestTemplate restTemplate = new RestTemplate();
-    private static final String API_URL = "https://dolarapi.com/v1/dolares/blue";
+    private static final String API_URL = "https://dolarapi.com/v1/dolares/oficial";
     private static final Double DEFAULT_DOLAR = 1000.0;
 
     @PostConstruct
@@ -63,5 +63,6 @@ public class DolarService {
         }
     }
 
-    private record DolarApiResponse(Double compra, Double venta, String fechaActualizacion) {}
+    private record DolarApiResponse(Double compra, Double venta, String fechaActualizacion) {
+    }
 }

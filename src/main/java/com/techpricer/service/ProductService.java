@@ -21,17 +21,14 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final DolarService dolarService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    // Regex pattern to capture name and price.
-    // Explanation:
-    // ^(?:[^\w\s]*) -> Skip leading non-word/non-space chars (like emojis, bullets) - simplified approach
-    // actually, let's just capture the name loosely and trim it later.
-    // (?<name>.+?) -> Capture name (non-greedy)
-    // \s*[-–]*\s* -> Separator (space, dash, en-dash)
-    // \$\s* -> Dollar sign and space
-    // (?<price>\d+) -> Integer price
-    // .*$ -> Any trailing chars
-    private static final Pattern PRODUCT_PATTERN = Pattern.compile("^(?:[▪️•\\-\\s]*)(?<name>.+?)\\s*(?:-|–)?\\s*\\$\\s*(?<price>\\d+).*$");
+    // Pattern for Category: Starts with ►
+    private static final Pattern CATEGORY_PATTERN = Pattern.compile("^►\\s*(.*)");
+
+    // Pattern for Product: Starts with ▪️, Name, - $ Price
+    private static final Pattern PRODUCT_PATTERN = Pattern
+            .compile("^▪️\\s*(?<name>.+?)\\s*-\\s*\\$\\s*(?<price>[\\d.,]+).*$");
 
     @Transactional
     public void importProducts(String rawText) {
@@ -39,34 +36,74 @@ public class ProductService {
             return;
         }
 
+        // Handle JSON wrapper if present ({"data": "..."})
+        if (rawText.trim().startsWith("{")) {
+            try {
+                var jsonNode = objectMapper.readTree(rawText);
+                if (jsonNode.has("data")) {
+                    rawText = jsonNode.get("data").asText();
+                }
+            } catch (java.io.IOException e) {
+                log.warn("Failed to parse rawText as JSON, treating as plain text", e);
+            }
+        }
+
         List<Product> products = new ArrayList<>();
         String[] lines = rawText.split("\\r?\\n");
+        String currentCategory = "";
 
         for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) continue;
+            String trimmedLine = line.trim();
+            if (trimmedLine.isEmpty())
+                continue;
 
-            Matcher matcher = PRODUCT_PATTERN.matcher(line);
-            if (matcher.matches()) {
+            // Check for Category
+            Matcher categoryMatcher = CATEGORY_PATTERN.matcher(trimmedLine);
+            if (categoryMatcher.find()) {
+                currentCategory = categoryMatcher.group(1).trim();
+                continue;
+            }
+
+            // Check for Product
+            Matcher productMatcher = PRODUCT_PATTERN.matcher(trimmedLine);
+            if (productMatcher.find()) {
                 try {
-                    String name = matcher.group("name").trim();
-                    // Clean up name if it still has leading special chars that weren't caught or if needed
-                    // For now, the regex prefix skip (?:[▪️•\-\s]*) should handle common bullets.
-                    // But to be safe, we can remove emojis from the start of the name if needed.
-                    // Let's assume the regex does a good enough job.
-
-                    int price = Integer.parseInt(matcher.group("price"));
+                    String name = productMatcher.group("name").trim();
+                    String priceStr = productMatcher.group("price").replace(",", ".");
+                    Double price = Double.parseDouble(priceStr);
 
                     Product product = Product.builder()
                             .name(name)
                             .originalPriceUsd(price)
+                            .category(currentCategory)
                             .build();
                     products.add(product);
+                    continue;
                 } catch (NumberFormatException e) {
                     log.warn("Could not parse price in line: {}", line);
                 }
-            } else {
-                log.debug("Line ignored: {}", line);
+            }
+
+            // Fallback: CSV (Name, Price, Category)
+            if (trimmedLine.contains(",") && !trimmedLine.startsWith("►") && !trimmedLine.startsWith("▪️")) {
+                String[] parts = trimmedLine.split(",");
+                if (parts.length >= 2) {
+                    try {
+                        String name = parts[0].trim();
+                        String pricePart = parts[1].trim().replace("$", "");
+                        Double price = Double.parseDouble(pricePart);
+                        String category = parts.length > 2 ? parts[2].trim() : currentCategory;
+
+                        Product product = Product.builder()
+                                .name(name)
+                                .originalPriceUsd(price)
+                                .category(category)
+                                .build();
+                        products.add(product);
+                    } catch (Exception e) {
+                        log.debug("Line failed CSV parsing: {}", line);
+                    }
+                }
             }
         }
 
@@ -82,12 +119,13 @@ public class ProductService {
         GlobalConfig config = dolarService.getConfig();
         Double dolarVenta = dolarService.getDolarVenta();
         Double markup = config.getProfitPercentage();
-        if (markup == null) markup = 0.0;
+        if (markup == null)
+            markup = 0.0;
 
         for (Product product : products) {
             if (product.getOriginalPriceUsd() != null) {
                 double priceArs = (product.getOriginalPriceUsd() * dolarVenta) * (1 + markup / 100);
-                product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0); // Round to 2 decimals
+                product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0);
             }
         }
         return products;

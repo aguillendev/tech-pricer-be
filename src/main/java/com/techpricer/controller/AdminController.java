@@ -1,5 +1,6 @@
 package com.techpricer.controller;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
 import com.techpricer.repository.GlobalConfigRepository;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "http://localhost:5173") // Allow frontend
 public class AdminController {
 
     private final ProductService productService;
@@ -19,16 +21,16 @@ public class AdminController {
     private final DolarService dolarService;
 
     @PostMapping("/import")
-    public ResponseEntity<String> importProducts(@RequestBody String rawText) {
+    public ResponseEntity<ErrorMessageResponse> importProducts(@RequestBody String rawText) {
         productService.importProducts(rawText);
-        return ResponseEntity.ok("Products imported successfully");
+        return ResponseEntity.ok(new ErrorMessageResponse(true, "Products imported successfully", null));
     }
 
-    @PutMapping("/config")
+    @PostMapping("/config")
     public ResponseEntity<GlobalConfig> updateConfig(@RequestBody ConfigUpdateRequest request) {
         GlobalConfig config = dolarService.getConfig();
-        if (request.profitPercentage() != null) {
-            config.setProfitPercentage(request.profitPercentage());
+        if (request.profitMargin() != null) {
+            config.setProfitPercentage(request.profitMargin());
         }
         if (request.manualDollarValue() != null) {
             config.setManualDollarValue(request.manualDollarValue());
@@ -37,11 +39,17 @@ public class AdminController {
         return ResponseEntity.ok(config);
     }
 
-    @PostMapping("/products")
+    @PostMapping("/product") // Align with frontend: /product (singular)
     public ResponseEntity<Product> addProduct(@RequestBody Product product) {
         Product saved = productService.addManualProduct(product);
         return ResponseEntity.ok(saved);
     }
 
-    public record ConfigUpdateRequest(Double profitPercentage, Double manualDollarValue) {}
+    public record ConfigUpdateRequest(
+            @JsonProperty("profitMargin") Double profitMargin,
+            Double manualDollarValue) {
+    }
+
+    public record ErrorMessageResponse(boolean success, String message, java.util.List<Product> products) {
+    }
 }

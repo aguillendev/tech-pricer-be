@@ -24,7 +24,10 @@ public class Product {
 
     private String name;
 
-    private Integer originalPriceUsd;
+    @com.fasterxml.jackson.annotation.JsonProperty("priceUsd")
+    private Double originalPriceUsd;
+
+    private String category;
 
     // Storing it as per requirement, but ideally should be calculated or cached.
     // We will update this whenever we recalculate prices.

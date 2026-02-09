@@ -1,5 +1,6 @@
 package com.techpricer.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
 import com.techpricer.repository.ProductRepository;
@@ -25,15 +26,19 @@ class ProductServiceTest {
     @Mock
     private DolarService dolarService;
 
+    @Mock
+    private ObjectMapper objectMapper;
+
     @InjectMocks
     private ProductService productService;
 
     @Test
     void importProducts_ShouldParseAndSaveValidLines() {
-        String input = "▪️IPHONE 15 128 GB - $ 625\n" +
-                       "► HEADER IGNORED\n" +
-                       "MACBOOK AIR M1 $ 900\n" + // checking flexible regex
-                       "Simple Product - $ 100";
+        String input = "► CELULARES\n" +
+                "▪️IPHONE 15 128 GB - $ 625.0\n" +
+                "► Laptops\n" +
+                "▪️MACBOOK AIR M1 - $ 900.5\n" +
+                "Simple Product, 100, Otros"; // CSV Fallback
 
         productService.importProducts(input);
 
@@ -47,24 +52,25 @@ class ProductServiceTest {
         // Check IPHONE
         Product p1 = savedProducts.get(0);
         assertEquals("IPHONE 15 128 GB", p1.getName());
-        assertEquals(625, p1.getOriginalPriceUsd());
+        assertEquals(625.0, p1.getOriginalPriceUsd());
+        assertEquals("CELULARES", p1.getCategory());
 
-        // Check MACBOOK (The regex expects $ to be present. If my regex handles no separator, good.)
-        // My regex was: (?:-|–)?\s*\$\s*
-        // So "MACBOOK AIR M1 $ 900" -> separator matches empty string. Should work.
+        // Check MACBOOK
         Product p2 = savedProducts.get(1);
         assertEquals("MACBOOK AIR M1", p2.getName());
-        assertEquals(900, p2.getOriginalPriceUsd());
+        assertEquals(900.5, p2.getOriginalPriceUsd());
+        assertEquals("Laptops", p2.getCategory());
 
         // Check Simple Product
         Product p3 = savedProducts.get(2);
         assertEquals("Simple Product", p3.getName());
-        assertEquals(100, p3.getOriginalPriceUsd());
+        assertEquals(100.0, p3.getOriginalPriceUsd());
+        assertEquals("Otros", p3.getCategory());
     }
 
     @Test
     void getAllProductsWithCalculatedPrice_ShouldCalculateCorrectly() {
-        Product p = Product.builder().name("Test").originalPriceUsd(100).build();
+        Product p = Product.builder().name("Test").originalPriceUsd(100.0).build();
         when(productRepository.findAll()).thenReturn(List.of(p));
 
         GlobalConfig config = GlobalConfig.builder().profitPercentage(20.0).build();
