@@ -17,7 +17,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/public")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = { "http://localhost:5173", "https://tech-pricer-bo.vercel.app" })
 public class PublicController {
 
     private final ProductService productService;
