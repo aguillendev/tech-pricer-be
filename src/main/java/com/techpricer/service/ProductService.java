@@ -109,18 +109,30 @@ public class ProductService {
 
         if (!products.isEmpty()) {
             productRepository.deleteAll();
+
+            // Calcular finalPriceArs al momento de importar
+            GlobalConfig config = dolarService.getConfig();
+            Double dolarVenta = dolarService.getDolarVenta();
+            Double markup = config.getProfitPercentage() != null ? config.getProfitPercentage() : 0.0;
+
+            for (Product product : products) {
+                if (product.getOriginalPriceUsd() != null) {
+                    double priceArs = (product.getOriginalPriceUsd() * dolarVenta) * (1 + markup / 100);
+                    product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0);
+                }
+            }
+
             productRepository.saveAll(products);
             log.info("Imported {} products", products.size());
         }
     }
 
+    @Transactional
     public List<Product> getAllProductsWithCalculatedPrice() {
         List<Product> products = productRepository.findAll();
         GlobalConfig config = dolarService.getConfig();
         Double dolarVenta = dolarService.getDolarVenta();
-        Double markup = config.getProfitPercentage();
-        if (markup == null)
-            markup = 0.0;
+        Double markup = config.getProfitPercentage() != null ? config.getProfitPercentage() : 0.0;
 
         for (Product product : products) {
             if (product.getOriginalPriceUsd() != null) {
@@ -128,6 +140,10 @@ public class ProductService {
                 product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0);
             }
         }
+
+        // Persistir los precios calculados en la DB
+        productRepository.saveAll(products);
+
         return products;
     }
 
