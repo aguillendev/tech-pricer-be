@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
-@CrossOrigin(origins = { "http://localhost:5173", "https://tech-pricer-bo.vercel.app" })
 public class AdminController {
 
     private final ProductService productService;
