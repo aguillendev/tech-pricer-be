@@ -146,6 +146,16 @@ public class ProductService {
         return productRepository.save(product);
     }
 
+    @Transactional
+    public void deleteProduct(Long id) {
+        productRepository.deleteById(id);
+    }
+
+    @Transactional
+    public void deleteProducts(List<Long> ids) {
+        productRepository.deleteAllById(ids);
+    }
+
     /**
      * Calcula el finalPriceArs de un producto individual aplicando las reglas de
      * ganancia

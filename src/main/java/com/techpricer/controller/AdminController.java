@@ -53,6 +53,18 @@ public class AdminController {
         return ResponseEntity.ok(withPrice);
     }
 
+    @DeleteMapping("/products/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable Long id) {
+        productService.deleteProduct(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/products")
+    public ResponseEntity<Void> deleteProducts(@RequestBody java.util.List<Long> ids) {
+        productService.deleteProducts(ids);
+        return ResponseEntity.noContent().build();
+    }
+
     // ── Reglas de ganancia ──────────────────────────────────────────────────────
 
     @GetMapping("/rules")
