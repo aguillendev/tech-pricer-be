@@ -3,9 +3,11 @@ package com.techpricer.controller;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
+import com.techpricer.model.ProfitRule;
 import com.techpricer.repository.GlobalConfigRepository;
 import com.techpricer.service.DolarService;
 import com.techpricer.service.ProductService;
+import com.techpricer.service.ProfitRuleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,11 +21,15 @@ public class AdminController {
     private final ProductService productService;
     private final GlobalConfigRepository configRepository;
     private final DolarService dolarService;
+    private final ProfitRuleService profitRuleService;
 
     @PostMapping("/import")
     public ResponseEntity<ErrorMessageResponse> importProducts(@RequestBody String rawText) {
         productService.importProducts(rawText);
-        return ResponseEntity.ok(new ErrorMessageResponse(true, "Products imported successfully", null));
+        // Devolvemos los productos con precios ya calculados (applica reglas de
+        // ganancia)
+        java.util.List<Product> calculatedProducts = productService.getAllProductsWithCalculatedPrice();
+        return ResponseEntity.ok(new ErrorMessageResponse(true, "Products imported successfully", calculatedProducts));
     }
 
     @PostMapping("/config")
@@ -42,7 +48,32 @@ public class AdminController {
     @PostMapping("/product") // Align with frontend: /product (singular)
     public ResponseEntity<Product> addProduct(@RequestBody Product product) {
         Product saved = productService.addManualProduct(product);
-        return ResponseEntity.ok(saved);
+        // Calcular precio final con reglas de ganancia
+        Product withPrice = productService.calculatePriceForProduct(saved);
+        return ResponseEntity.ok(withPrice);
+    }
+
+    // ── Reglas de ganancia ──────────────────────────────────────────────────────
+
+    @GetMapping("/rules")
+    public ResponseEntity<java.util.List<ProfitRule>> getRules() {
+        return ResponseEntity.ok(profitRuleService.getAllRules());
+    }
+
+    @PostMapping("/rules")
+    public ResponseEntity<ProfitRule> createRule(@RequestBody ProfitRule rule) {
+        return ResponseEntity.ok(profitRuleService.createRule(rule));
+    }
+
+    @PutMapping("/rules/{id}")
+    public ResponseEntity<ProfitRule> updateRule(@PathVariable Long id, @RequestBody ProfitRule rule) {
+        return ResponseEntity.ok(profitRuleService.updateRule(id, rule));
+    }
+
+    @DeleteMapping("/rules/{id}")
+    public ResponseEntity<Void> deleteRule(@PathVariable Long id) {
+        profitRuleService.deleteRule(id);
+        return ResponseEntity.noContent().build();
     }
 
     public record ConfigUpdateRequest(

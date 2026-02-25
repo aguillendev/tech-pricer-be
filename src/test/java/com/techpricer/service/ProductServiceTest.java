@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
 import com.techpricer.repository.ProductRepository;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -12,6 +11,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,6 +25,9 @@ class ProductServiceTest {
 
     @Mock
     private DolarService dolarService;
+
+    @Mock
+    private ProfitRuleService profitRuleService;
 
     @Mock
     private ObjectMapper objectMapper;
@@ -76,6 +79,10 @@ class ProductServiceTest {
         GlobalConfig config = GlobalConfig.builder().profitPercentage(20.0).build();
         when(dolarService.getConfig()).thenReturn(config);
         when(dolarService.getDolarVenta()).thenReturn(1000.0);
+
+        // Sin reglas → usa el margen global (20.0)
+        when(profitRuleService.getAllRules()).thenReturn(Collections.emptyList());
+        when(profitRuleService.resolveProfit(any(), any())).thenReturn(null);
 
         List<Product> result = productService.getAllProductsWithCalculatedPrice();
 
