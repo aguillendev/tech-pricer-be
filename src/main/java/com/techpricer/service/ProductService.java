@@ -3,6 +3,7 @@ package com.techpricer.service;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
 import com.techpricer.model.ProfitRule;
+import com.techpricer.repository.GlobalConfigRepository;
 import com.techpricer.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +21,16 @@ import java.util.regex.Pattern;
 public class ProductService {
 
     private final ProductRepository productRepository;
-    private final DolarService dolarService;
+    private final GlobalConfigRepository configRepository;
     private final ProfitRuleService profitRuleService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    private GlobalConfig getConfig() {
+        return configRepository.findById(1L).orElseGet(() -> {
+            GlobalConfig c = GlobalConfig.builder().id(1L).profitPercentage(0.0).build();
+            return configRepository.save(c);
+        });
+    }
 
     // Pattern for Category: Starts with ►
     private static final Pattern CATEGORY_PATTERN = Pattern.compile("^►\\s*(.*)");
@@ -115,29 +123,26 @@ public class ProductService {
         }
     }
 
-    public List<Product> getAllProductsWithCalculatedPrice() {
+    /**
+     * @param dolarVenta cotización obtenida previamente por el controller (nunca
+     *                   null).
+     */
+    public List<Product> getAllProductsWithCalculatedPrice(Double dolarVenta) {
         List<Product> products = productRepository.findAll();
-        GlobalConfig config = dolarService.getConfig();
-        Double dolarVenta = dolarService.getDolarVenta();
+        GlobalConfig config = getConfig();
         Double globalMarkup = config.getProfitPercentage() != null ? config.getProfitPercentage() : 0.0;
 
         List<ProfitRule> rules = profitRuleService.getAllRules();
-        log.debug("[PriceCalc] Rules loaded: {}, globalMarkup: {}", rules.size(), globalMarkup);
-        rules.forEach(r -> log.debug("  Rule id={} min={} max={} profit={}",
-                r.getId(), r.getMinPriceUsd(), r.getMaxPriceUsd(), r.getProfitPercentage()));
+        log.debug("[PriceCalc] Rules loaded: {}, globalMarkup: {}, dolar: {}", rules.size(), globalMarkup, dolarVenta);
 
         for (Product product : products) {
             if (product.getOriginalPriceUsd() != null) {
                 Double resolvedMarkup = profitRuleService.resolveProfit(product.getOriginalPriceUsd(), rules);
                 double markup = resolvedMarkup != null ? resolvedMarkup : globalMarkup;
-                log.debug("  Product '{}' usd={} -> resolvedMarkup={} usedMarkup={}",
-                        product.getName(), product.getOriginalPriceUsd(), resolvedMarkup, markup);
-
                 double priceArs = (product.getOriginalPriceUsd() * dolarVenta) * (1 + markup / 100);
                 product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0);
             }
         }
-
         return products;
     }
 
@@ -157,17 +162,15 @@ public class ProductService {
     }
 
     /**
-     * Calcula el finalPriceArs de un producto individual aplicando las reglas de
-     * ganancia
-     * por tramos. Si ninguna regla aplica, usa el porcentaje de ganancia global.
-     * No persiste el cambio: solo actualiza el objeto en memoria.
+     * Calcula el finalPriceArs de un producto individual.
+     * 
+     * @param dolarVenta cotización obtenida previamente por el controller.
      */
-    public Product calculatePriceForProduct(Product product) {
+    public Product calculatePriceForProduct(Product product, Double dolarVenta) {
         if (product.getOriginalPriceUsd() == null) {
             return product;
         }
-        GlobalConfig config = dolarService.getConfig();
-        Double dolarVenta = dolarService.getDolarVenta();
+        GlobalConfig config = getConfig();
         Double globalMarkup = config.getProfitPercentage() != null ? config.getProfitPercentage() : 0.0;
 
         List<ProfitRule> rules = profitRuleService.getAllRules();
@@ -176,8 +179,8 @@ public class ProductService {
 
         double priceArs = (product.getOriginalPriceUsd() * dolarVenta) * (1 + markup / 100);
         product.setFinalPriceArs(Math.round(priceArs * 100.0) / 100.0);
-        log.debug("[PriceCalc] Producto '{}' usd={} markup={}% -> finalArs={}",
-                product.getName(), product.getOriginalPriceUsd(), markup, product.getFinalPriceArs());
+        log.debug("[PriceCalc] '{}' usd={} markup={}% dolar={} -> finalArs={}",
+                product.getName(), product.getOriginalPriceUsd(), markup, dolarVenta, product.getFinalPriceArs());
         return product;
     }
 }

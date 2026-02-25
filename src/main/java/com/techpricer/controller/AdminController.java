@@ -6,16 +6,18 @@ import com.techpricer.model.Product;
 import com.techpricer.model.ProfitRule;
 import com.techpricer.repository.GlobalConfigRepository;
 import com.techpricer.service.DolarService;
+import com.techpricer.service.DolarService.DollarRateUnavailableException;
 import com.techpricer.service.ProductService;
 import com.techpricer.service.ProfitRuleService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
-@CrossOrigin(origins = { "http://localhost:5173", "https://tech-pricer-bo.vercel.app" }) // Allow frontend
+@CrossOrigin(origins = { "http://localhost:5173", "https://tech-pricer-bo.vercel.app" })
 public class AdminController {
 
     private final ProductService productService;
@@ -23,34 +25,50 @@ public class AdminController {
     private final DolarService dolarService;
     private final ProfitRuleService profitRuleService;
 
+    private GlobalConfig getConfig() {
+        return configRepository.findById(1L).orElseGet(() -> {
+            GlobalConfig c = GlobalConfig.builder().id(1L).profitPercentage(0.0).build();
+            return configRepository.save(c);
+        });
+    }
+
     @PostMapping("/import")
-    public ResponseEntity<ErrorMessageResponse> importProducts(@RequestBody String rawText) {
-        productService.importProducts(rawText);
-        // Devolvemos los productos con precios ya calculados (applica reglas de
-        // ganancia)
-        java.util.List<Product> calculatedProducts = productService.getAllProductsWithCalculatedPrice();
-        return ResponseEntity.ok(new ErrorMessageResponse(true, "Products imported successfully", calculatedProducts));
+    public ResponseEntity<?> importProducts(@RequestBody String rawText) {
+        try {
+            Double dolarVenta = dolarService.getDolarVenta();
+            productService.importProducts(rawText);
+            java.util.List<Product> calculatedProducts = productService.getAllProductsWithCalculatedPrice(dolarVenta);
+            return ResponseEntity
+                    .ok(new ErrorMessageResponse(true, "Products imported successfully", calculatedProducts));
+        } catch (DollarRateUnavailableException e) {
+            return ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(new ErrorMessageResponse(false, e.getMessage(), null));
+        }
     }
 
     @PostMapping("/config")
     public ResponseEntity<GlobalConfig> updateConfig(@RequestBody ConfigUpdateRequest request) {
-        GlobalConfig config = dolarService.getConfig();
+        GlobalConfig config = getConfig();
         if (request.profitMargin() != null) {
             config.setProfitPercentage(request.profitMargin());
-        }
-        if (request.manualDollarValue() != null) {
-            config.setManualDollarValue(request.manualDollarValue());
         }
         configRepository.save(config);
         return ResponseEntity.ok(config);
     }
 
-    @PostMapping("/product") // Align with frontend: /product (singular)
-    public ResponseEntity<Product> addProduct(@RequestBody Product product) {
-        Product saved = productService.addManualProduct(product);
-        // Calcular precio final con reglas de ganancia
-        Product withPrice = productService.calculatePriceForProduct(saved);
-        return ResponseEntity.ok(withPrice);
+    @PostMapping("/product")
+    public ResponseEntity<?> addProduct(@RequestBody Product product) {
+        try {
+            Double dolarVenta = dolarService.getDolarVenta();
+            Product saved = productService.addManualProduct(product);
+            Product withPrice = productService.calculatePriceForProduct(saved, dolarVenta);
+            return ResponseEntity.ok(withPrice);
+        } catch (DollarRateUnavailableException e) {
+            return ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(e.getMessage());
+        }
     }
 
     @DeleteMapping("/products/{id}")
@@ -89,8 +107,7 @@ public class AdminController {
     }
 
     public record ConfigUpdateRequest(
-            @JsonProperty("profitMargin") Double profitMargin,
-            Double manualDollarValue) {
+            @JsonProperty("profitMargin") Double profitMargin) {
     }
 
     public record ErrorMessageResponse(boolean success, String message, java.util.List<Product> products) {

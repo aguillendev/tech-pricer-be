@@ -2,16 +2,15 @@ package com.techpricer.controller;
 
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
+import com.techpricer.repository.GlobalConfigRepository;
 import com.techpricer.service.DolarService;
+import com.techpricer.service.DolarService.DollarRateUnavailableException;
 import com.techpricer.service.ProductService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -22,30 +21,51 @@ public class PublicController {
 
     private final ProductService productService;
     private final DolarService dolarService;
+    private final GlobalConfigRepository configRepository;
 
+    /**
+     * Devuelve todos los productos con su precio en ARS calculado en tiempo real.
+     * Si no se puede obtener la cotización del dólar retorna HTTP 503.
+     */
     @GetMapping("/products")
-    public ResponseEntity<List<Product>> getProducts() {
-        return ResponseEntity.ok(productService.getAllProductsWithCalculatedPrice());
+    public ResponseEntity<?> getProducts() {
+        try {
+            Double dolarVenta = dolarService.getDolarVenta();
+            List<Product> products = productService.getAllProductsWithCalculatedPrice(dolarVenta);
+            return ResponseEntity.ok(products);
+        } catch (DollarRateUnavailableException e) {
+            return ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(new ErrorResponse(e.getMessage()));
+        }
     }
 
+    /**
+     * Devuelve la configuración pública (margen de ganancia + cotización actual).
+     * Si no se puede obtener la cotización del dólar retorna HTTP 503.
+     */
     @GetMapping("/config")
-    public ResponseEntity<PublicConfigResponse> getConfig() {
-        Double currentDolar = dolarService.getDolarVenta();
-        GlobalConfig config = dolarService.getConfig();
-        // We can get the update time from the config entity
-        LocalDateTime lastUpdated = config.getLastUpdated();
-        Double profitMargin = config.getProfitPercentage();
-
-        return ResponseEntity.ok(new PublicConfigResponse(
-                currentDolar,
-                profitMargin != null ? profitMargin : 0.0,
-                lastUpdated));
+    public ResponseEntity<?> getConfig() {
+        try {
+            Double dolarVenta = dolarService.getDolarVenta();
+            GlobalConfig config = configRepository.findById(1L)
+                    .orElseGet(() -> GlobalConfig.builder().id(1L).profitPercentage(0.0).build());
+            Double profitMargin = config.getProfitPercentage();
+            return ResponseEntity.ok(new PublicConfigResponse(
+                    dolarVenta,
+                    profitMargin != null ? profitMargin : 0.0));
+        } catch (DollarRateUnavailableException e) {
+            return ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(new ErrorResponse(e.getMessage()));
+        }
     }
 
-    // Match frontend expected mapping
     public record PublicConfigResponse(
             @com.fasterxml.jackson.annotation.JsonProperty("dollarRate") Double dollarRate,
-            @com.fasterxml.jackson.annotation.JsonProperty("profitMargin") Double profitMargin,
-            LocalDateTime lastUpdated) {
+            @com.fasterxml.jackson.annotation.JsonProperty("profitMargin") Double profitMargin) {
+    }
+
+    public record ErrorResponse(String error) {
     }
 }

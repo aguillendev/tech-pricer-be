@@ -3,6 +3,7 @@ package com.techpricer.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.techpricer.model.GlobalConfig;
 import com.techpricer.model.Product;
+import com.techpricer.repository.GlobalConfigRepository;
 import com.techpricer.repository.ProductRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -24,7 +26,7 @@ class ProductServiceTest {
     private ProductRepository productRepository;
 
     @Mock
-    private DolarService dolarService;
+    private GlobalConfigRepository configRepository;
 
     @Mock
     private ProfitRuleService profitRuleService;
@@ -46,6 +48,7 @@ class ProductServiceTest {
         productService.importProducts(input);
 
         verify(productRepository).deleteAll();
+        @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
         verify(productRepository).saveAll(captor.capture());
 
@@ -77,18 +80,17 @@ class ProductServiceTest {
         when(productRepository.findAll()).thenReturn(List.of(p));
 
         GlobalConfig config = GlobalConfig.builder().profitPercentage(20.0).build();
-        when(dolarService.getConfig()).thenReturn(config);
-        when(dolarService.getDolarVenta()).thenReturn(1000.0);
+        when(configRepository.findById(1L)).thenReturn(Optional.of(config));
 
         // Sin reglas → usa el margen global (20.0)
         when(profitRuleService.getAllRules()).thenReturn(Collections.emptyList());
         when(profitRuleService.resolveProfit(any(), any())).thenReturn(null);
 
-        List<Product> result = productService.getAllProductsWithCalculatedPrice();
+        // El dólar ahora se pasa como parámetro (1000.0)
+        List<Product> result = productService.getAllProductsWithCalculatedPrice(1000.0);
 
         assertEquals(1, result.size());
-        Product resP = result.get(0);
         // 100 * 1000 * 1.20 = 120000
-        assertEquals(120000.0, resP.getFinalPriceArs());
+        assertEquals(120000.0, result.get(0).getFinalPriceArs());
     }
 }

@@ -18,13 +18,9 @@ import java.time.LocalDateTime;
 public class GlobalConfig {
 
     @Id
-    private Long id; // Will use 1 for singleton
+    private Long id; // Singleton: siempre id=1
 
     private Double profitPercentage;
-
-    private Double manualDollarValue; // Fallback or manual override
-
-    private Double lastApiDollarValue; // Last successful API fetch
 
     private LocalDateTime lastUpdated;
 }
