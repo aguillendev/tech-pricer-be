@@ -35,9 +35,10 @@ public class ProductService {
     // Pattern for Category: Starts with ►
     private static final Pattern CATEGORY_PATTERN = Pattern.compile("^►\\s*(.*)");
 
-    // Pattern for Product: Starts with ▪️, Name, - $ Price
+    // Pattern for Product: Starts with ▪️, Name, - $ Price, optional note after
+    // price (e.g. *S/CARG*)
     private static final Pattern PRODUCT_PATTERN = Pattern
-            .compile("^▪️\\s*(?<name>.+?)\\s*-\\s*\\$\\s*(?<price>[\\d.,]+).*$");
+            .compile("^▪️\\s*(?<name>.+?)\\s*-\\s*\\$\\s*(?<price>[\\d.,]+)(?:\\s+(?<note>.+))?$");
 
     @Transactional
     public void importProducts(String rawText) {
@@ -80,6 +81,15 @@ public class ProductService {
                     String name = productMatcher.group("name").trim();
                     String priceStr = productMatcher.group("price").replace(",", ".");
                     Double price = Double.parseDouble(priceStr);
+
+                    // Append optional note (e.g. *S/CARG* -> S/CARG) to the product name
+                    String rawNote = productMatcher.group("note");
+                    if (rawNote != null && !rawNote.isBlank()) {
+                        String cleanNote = rawNote.trim().replaceAll("\\*", "").trim();
+                        if (!cleanNote.isEmpty()) {
+                            name = name + " (" + cleanNote + ")";
+                        }
+                    }
 
                     Product product = Product.builder()
                             .name(name)
