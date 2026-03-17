@@ -40,6 +40,10 @@ public class ProductService {
     private static final Pattern PRODUCT_PATTERN = Pattern
             .compile("^▪️\\s*(?<name>.+?)\\s*-\\s*\\$\\s*(?<price>[\\d.,]+)(?:\\s+(?<note>.+))?$");
 
+    // Pattern for a single color/variant token: LABEL ($PRICE)
+    private static final Pattern VARIANT_TOKEN_PATTERN = Pattern
+            .compile("(?<label>[^/()]+?)\\s*\\(\\$\\s*(?<price>[\\d.,]+)\\)");
+
     @Transactional
     public void importProducts(String rawText) {
         if (rawText == null || rawText.isEmpty()) {
@@ -61,46 +65,172 @@ public class ProductService {
         List<Product> products = new ArrayList<>();
         String[] lines = rawText.split("\\r?\\n");
         String currentCategory = "";
+        // Context for the last parsed ▪️ product — used to expand variant sub-lines.
+        String lastBaseName = null;   // base product name (without note)
+        String lastProductNote = "";  // note suffix already formatted, e.g. " (S/CARG)"
+        double lastProductPrice = 0.0;
+        int lastProductIndex = -1;
 
         for (String line : lines) {
             String trimmedLine = line.trim();
-            if (trimmedLine.isEmpty())
-                continue;
-
-            // Check for Category
-            Matcher categoryMatcher = CATEGORY_PATTERN.matcher(trimmedLine);
-            if (categoryMatcher.find()) {
-                currentCategory = categoryMatcher.group(1).trim();
+            if (trimmedLine.isEmpty()) {
+                lastBaseName = null;
+                lastProductIndex = -1;
+                lastProductNote = "";
                 continue;
             }
 
-            // Check for Product
+            // ── Category ──────────────────────────────────────────────────────────────
+            Matcher categoryMatcher = CATEGORY_PATTERN.matcher(trimmedLine);
+            if (categoryMatcher.find()) {
+                currentCategory = categoryMatcher.group(1).trim();
+                lastBaseName = null;
+                lastProductIndex = -1;
+                lastProductNote = "";
+                continue;
+            }
+
+            // ── Sub-variant line (follows a ▪️ line) ──────────────────────────────────
+            if (lastBaseName != null) {
+
+                // Format A: each token has its own price  →  ORANGE ($1400) / BLUE ($1410)
+                if (trimmedLine.contains("(") && trimmedLine.contains(")")) {
+                    List<Product> variants = new ArrayList<>();
+                    String[] segments = trimmedLine.split("\\s*/\\s*");
+                    for (String segment : segments) {
+                        Matcher vm = VARIANT_TOKEN_PATTERN.matcher(segment.trim());
+                        if (vm.find()) {
+                            String label = vm.group("label").trim();
+                            String priceStr = vm.group("price").replace(",", ".");
+                            try {
+                                double price = Double.parseDouble(priceStr);
+                                variants.add(Product.builder()
+                                        .name(lastBaseName + " " + label)
+                                        .originalPriceUsd(price)
+                                        .category(currentCategory)
+                                        .build());
+                            } catch (NumberFormatException e) {
+                                log.warn("Could not parse variant price in segment '{}'", segment);
+                            }
+                        }
+                    }
+                    if (!variants.isEmpty()) {
+                        products.remove(lastProductIndex);
+                        products.addAll(variants);
+                        log.debug("[Format A] Expanded '{}' into {} variants", lastBaseName, variants.size());
+                        lastBaseName = null;
+                        lastProductIndex = -1;
+                        lastProductNote = "";
+                        continue;
+                    }
+                }
+
+                // Format B: plain label(s), no prices  →  "BLUE / GREEN" or just "GRAY"
+                // Guard: must not look like a CSV line, contain digits, $ or special chars
+                // that would indicate it's something other than a label/colour list.
+                boolean looksLikePlainLabel = !trimmedLine.contains("$")
+                        && !trimmedLine.contains("(")
+                        && !trimmedLine.startsWith("►")
+                        && !trimmedLine.startsWith("▪")
+                        && !trimmedLine.matches(".*\\d.*")   // no digits → not a price/CSV
+                        && !trimmedLine.contains(",");       // no comma → not CSV
+                if (looksLikePlainLabel) {
+                    String[] labels = trimmedLine.split("\\s*/\\s*");
+                    List<Product> variants = new ArrayList<>();
+                    for (String label : labels) {
+                        String lbl = label.trim();
+                        if (!lbl.isEmpty()) {
+                            // name = base + label + original note (e.g. " (S/CARG)")
+                            variants.add(Product.builder()
+                                    .name(lastBaseName + " " + lbl + lastProductNote)
+                                    .originalPriceUsd(lastProductPrice)
+                                    .category(currentCategory)
+                                    .build());
+                        }
+                    }
+                    if (!variants.isEmpty()) {
+                        products.remove(lastProductIndex);
+                        products.addAll(variants);
+                        log.debug("[Format B] Expanded '{}' into {} plain variants", lastBaseName, variants.size());
+                        lastBaseName = null;
+                        lastProductIndex = -1;
+                        lastProductNote = "";
+                        continue;
+                    }
+                }
+            }
+
+            // ── Product line (▪️) ───────────────────────────────────────────────────
             Matcher productMatcher = PRODUCT_PATTERN.matcher(trimmedLine);
             if (productMatcher.find()) {
                 try {
                     String name = productMatcher.group("name").trim();
                     String priceStr = productMatcher.group("price").replace(",", ".");
-                    Double price = Double.parseDouble(priceStr);
+                    double price = Double.parseDouble(priceStr);
 
-                    // Append optional note (e.g. *S/CARG* -> S/CARG) to the product name
+                    // Build the note suffix, avoiding double-wrapping parentheses.
+                    // Raw note examples: "(S/CARG)", "*S/CARG*", "BLUE / GREEN", "a$ 1410"
                     String rawNote = productMatcher.group("note");
+                    String noteAppend = "";  // ready-to-append suffix, e.g. " (S/CARG)"
+
                     if (rawNote != null && !rawNote.isBlank()) {
-                        String cleanNote = rawNote.trim().replaceAll("\\*", "").trim();
-                        if (!cleanNote.isEmpty()) {
-                            name = name + " (" + cleanNote + ")";
+                        // Strip: asterisks (formatting), emoji / symbol codepoints, variation selectors
+                        String stripped = rawNote.trim()
+                                .replaceAll("\\*", "")
+                                .replaceAll("[\\p{So}\\p{Cs}\\uFE0F\\u200D]", "")
+                                .trim();
+
+                        // Format C: inline variants in the note  →  BLUE / GREEN
+                        if (stripped.contains(" / ")) {
+                            String[] variantLabels = stripped.split("\\s*/\\s*");
+                            for (String vl : variantLabels) {
+                                String lbl = vl.trim();
+                                if (!lbl.isEmpty()) {
+                                    products.add(Product.builder()
+                                            .name(name + " " + lbl)
+                                            .originalPriceUsd(price)
+                                            .category(currentCategory)
+                                            .build());
+                                }
+                            }
+                            log.debug("[Format C] Expanded '{}' inline into {} variants", name, variantLabels.length);
+                            lastBaseName = null;
+                            lastProductIndex = -1;
+                            lastProductNote = "";
+                            continue;
+                        }
+
+                        // Normal note: avoid double-wrapping if already parenthesised
+                        if (!stripped.isEmpty()) {
+                            if (stripped.startsWith("(") && stripped.endsWith(")")) {
+                                noteAppend = " " + stripped;         // e.g. " (S/CARG)"
+                            } else {
+                                noteAppend = " (" + stripped + ")";  // e.g. " (a$ 1410)"
+                            }
                         }
                     }
 
                     Product product = Product.builder()
-                            .name(name)
+                            .name(name + noteAppend)
                             .originalPriceUsd(price)
                             .category(currentCategory)
                             .build();
+                    lastProductIndex = products.size();
+                    lastBaseName = name;        // clean base name — no note
+                    lastProductNote = noteAppend;
+                    lastProductPrice = price;
                     products.add(product);
                     continue;
                 } catch (NumberFormatException e) {
                     log.warn("Could not parse price in line: {}", line);
+                    lastBaseName = null;
+                    lastProductIndex = -1;
+                    lastProductNote = "";
                 }
+            } else {
+                lastBaseName = null;
+                lastProductIndex = -1;
+                lastProductNote = "";
             }
 
             // Fallback: CSV (Name, Price, Category)
