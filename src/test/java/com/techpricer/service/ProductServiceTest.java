@@ -75,6 +75,138 @@ class ProductServiceTest {
     }
 
     @Test
+    void importProducts_ShouldExpandColorVariants_FormatA() {
+        // Format A: sub-line with individual prices per variant
+        String input = "► CELULARES\n" +
+                "▪️IPHONE 17 PRO MAX 256 GB (ESIM) - $1400 a$ 1410\n" +
+                "ORANGE ($1400) / BLUE ($1410)";
+
+        productService.importProducts(input);
+
+        verify(productRepository).deleteAll();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        List<Product> savedProducts = captor.getValue();
+        assertEquals(2, savedProducts.size(), "Should have 2 variant products (no parent)");
+
+        Product orange = savedProducts.get(0);
+        assertEquals("IPHONE 17 PRO MAX 256 GB (ESIM) ORANGE", orange.getName());
+        assertEquals(1400.0, orange.getOriginalPriceUsd());
+        assertEquals("CELULARES", orange.getCategory());
+
+        Product blue = savedProducts.get(1);
+        assertEquals("IPHONE 17 PRO MAX 256 GB (ESIM) BLUE", blue.getName());
+        assertEquals(1410.0, blue.getOriginalPriceUsd());
+        assertEquals("CELULARES", blue.getCategory());
+    }
+
+    @Test
+    void importProducts_ShouldExpandPlainLabels_FormatB() {
+        // Format B: sub-line with plain labels, price and note come from the parent line
+        String input = "► CELULARES\n" +
+                "▪️MOTOROLA G05 4/256 GB - $ 130 (S/CARG)\n" +
+                "BLUE / GREEN";
+
+        productService.importProducts(input);
+
+        verify(productRepository).deleteAll();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        List<Product> savedProducts = captor.getValue();
+        assertEquals(2, savedProducts.size(), "Should have 2 plain-label variants");
+
+        Product blue = savedProducts.get(0);
+        assertEquals("MOTOROLA G05 4/256 GB BLUE (S/CARG)", blue.getName());
+        assertEquals(130.0, blue.getOriginalPriceUsd());
+
+        Product green = savedProducts.get(1);
+        assertEquals("MOTOROLA G05 4/256 GB GREEN (S/CARG)", green.getName());
+        assertEquals(130.0, green.getOriginalPriceUsd());
+    }
+
+    @Test
+    void importProducts_ShouldExpandInlineVariants_FormatC() {
+        // Format C: variants listed inline in the same ▪️ line as the note
+        String input = "► CELULARES\n" +
+                "▪️MOTOROLA G05 4/256 GB - $ 140 BLUE / GREEN";
+
+        productService.importProducts(input);
+
+        verify(productRepository).deleteAll();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        List<Product> savedProducts = captor.getValue();
+        assertEquals(2, savedProducts.size(), "Should have 2 inline variants");
+
+        assertEquals("MOTOROLA G05 4/256 GB BLUE", savedProducts.get(0).getName());
+        assertEquals(140.0, savedProducts.get(0).getOriginalPriceUsd());
+
+        assertEquals("MOTOROLA G05 4/256 GB GREEN", savedProducts.get(1).getName());
+        assertEquals(140.0, savedProducts.get(1).getOriginalPriceUsd());
+    }
+
+    @Test
+    void importProducts_ShouldNotDoubleWrapParentheses() {
+        // Regression: note "(S/CARG)" must not become "((S/CARG))"
+        String input = "► CELULARES\n" +
+                "▪️MOTOROLA G05 4/256 GB - $ 130 (S/CARG)";
+
+        productService.importProducts(input);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        Product p = captor.getValue().get(0);
+        assertEquals("MOTOROLA G05 4/256 GB (S/CARG)", p.getName());
+    }
+
+    @Test
+    void importProducts_ShouldExpandSingleLabelSubLine() {
+        // Single color on a sub-line with no slash separator
+        String input = "► CELULARES\n" +
+                "▪️SAMSUNG S25 ULTRA 12/256 GB - $ 945\n" +
+                "GRAY";
+
+        productService.importProducts(input);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        List<Product> saved = captor.getValue();
+        assertEquals(1, saved.size());
+        assertEquals("SAMSUNG S25 ULTRA 12/256 GB GRAY", saved.get(0).getName());
+        assertEquals(945.0, saved.get(0).getOriginalPriceUsd());
+    }
+
+    @Test
+    void importProducts_ShouldStripEmojiFromNote() {
+        // Emoji in the note must be stripped; the color on the sub-line must be appended
+        String input = "► CELULARES\n" +
+                "▪️SAMSUNG A06 4/64 GB - $ 95 \uD83D\uDD25\n" +
+                "BLACK";
+
+        productService.importProducts(input);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Product>> captor = ArgumentCaptor.forClass(List.class);
+        verify(productRepository).saveAll(captor.capture());
+
+        List<Product> saved = captor.getValue();
+        assertEquals(1, saved.size());
+        // No emoji in the name, color appended, no extra note
+        assertEquals("SAMSUNG A06 4/64 GB BLACK", saved.get(0).getName());
+        assertEquals(95.0, saved.get(0).getOriginalPriceUsd());
+    }
+
+    @Test
     void getAllProductsWithCalculatedPrice_ShouldCalculateCorrectly() {
         Product p = Product.builder().name("Test").originalPriceUsd(100.0).build();
         when(productRepository.findAll()).thenReturn(List.of(p));
