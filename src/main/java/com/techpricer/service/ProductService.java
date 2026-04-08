@@ -79,6 +79,8 @@ public class ProductService {
             if (productMatcher.find()) {
                 try {
                     String name = productMatcher.group("name").trim();
+                    // Ignoramos texto de cantidad y precio por mayor dentro de parentesis ej: (x 10 uni 22 uss) o (x 8 un 50uss)
+                    name = name.replaceAll("(?i)\\s*\\(x\\s*\\d+\\s*un(?:i)?[^)]*\\)", "").trim();
                     String priceStr = productMatcher.group("price").replace(",", ".");
                     Double price = Double.parseDouble(priceStr);
 
