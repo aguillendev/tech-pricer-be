@@ -43,6 +43,9 @@ class ProductServiceTest {
                 "▪️IPHONE 15 128 GB - $ 625.0\n" +
                 "► Laptops\n" +
                 "▪️MACBOOK AIR M1 - $ 900.5\n" +
+                "▪️CARGADOR APPLE 20W USB-C ORIGINAL (x 10 uni 22 uss) - $ 25\n" +
+                "▪️TELEVISOR HD 85 (x 8 un 50uss) - $ 2600\n" +
+                "▪️OTRO PRODUCTO (x 3 uni 9 uss) - $ 15\n" +
                 "Simple Product, 100, Otros"; // CSV Fallback
 
         productService.importProducts(input);
@@ -53,7 +56,7 @@ class ProductServiceTest {
         verify(productRepository).saveAll(captor.capture());
 
         List<Product> savedProducts = captor.getValue();
-        assertEquals(3, savedProducts.size());
+        assertEquals(6, savedProducts.size());
 
         // Check IPHONE
         Product p1 = savedProducts.get(0);
@@ -67,11 +70,29 @@ class ProductServiceTest {
         assertEquals(900.5, p2.getOriginalPriceUsd());
         assertEquals("Laptops", p2.getCategory());
 
-        // Check Simple Product
+        // Check CARGADOR
         Product p3 = savedProducts.get(2);
-        assertEquals("Simple Product", p3.getName());
-        assertEquals(100.0, p3.getOriginalPriceUsd());
-        assertEquals("Otros", p3.getCategory());
+        assertEquals("CARGADOR APPLE 20W USB-C ORIGINAL", p3.getName());
+        assertEquals(25.0, p3.getOriginalPriceUsd());
+        assertEquals("Laptops", p3.getCategory());
+
+        // Check TELEVISOR
+        Product p4 = savedProducts.get(3);
+        assertEquals("TELEVISOR HD 85", p4.getName());
+        assertEquals(2600.0, p4.getOriginalPriceUsd());
+        assertEquals("Laptops", p4.getCategory());
+
+        // Check OTRO PRODUCTO
+        Product p5 = savedProducts.get(4);
+        assertEquals("OTRO PRODUCTO", p5.getName());
+        assertEquals(15.0, p5.getOriginalPriceUsd());
+        assertEquals("Laptops", p5.getCategory());
+
+        // Check Simple Product
+        Product p6 = savedProducts.get(5);
+        assertEquals("Simple Product", p6.getName());
+        assertEquals(100.0, p6.getOriginalPriceUsd());
+        assertEquals("Otros", p6.getCategory());
     }
 
     @Test
