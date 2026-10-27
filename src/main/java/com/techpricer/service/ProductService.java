@@ -35,10 +35,68 @@ public class ProductService {
     // Pattern for Category: Starts with ►
     private static final Pattern CATEGORY_PATTERN = Pattern.compile("^►\\s*(.*)");
 
-    // Pattern for Product: Starts with ▪️, Name, - $ Price, optional note after
+    // Pattern for Product: Starts with ▪️ (o ▪), Name, - $ Price, optional note after
     // price (e.g. *S/CARG*)
     private static final Pattern PRODUCT_PATTERN = Pattern
-            .compile("^▪️\\s*(?<name>.+?)\\s*-\\s*\\$\\s*(?<price>[\\d.,]+)(?:\\s+(?<note>.+))?$");
+            .compile("^▪\uFE0F?\\s*(?<name>.+?)\\s*[-–—]\\s*\\$\\s*(?<price>[\\d.,]+)(?:\\s+(?<note>.+))?$");
+
+    /**
+     * Parsea un string de precio admitiendo puntos o comas como separadores de miles
+     * o decimales (ej: "$2.700", "2.700", "2.700,50", "625.0", "900.5", "2600").
+     */
+    public static Double parsePrice(String priceStr) {
+        if (priceStr == null || priceStr.isBlank()) {
+            throw new NumberFormatException("Price string is empty");
+        }
+
+        String clean = priceStr.trim().replace("$", "").replace("\u00A0", "").replaceAll("\\s+", "");
+
+        // 1. Ambos separadores presentes (ej: "2.700,50", "2.700,00", "1.250.000,50")
+        // La coma se utiliza exclusivamente como separador decimal y los puntos como separadores de miles
+        if (clean.contains(".") && clean.contains(",")) {
+            clean = clean.replace(".", "").replace(",", ".");
+            return Double.parseDouble(clean);
+        }
+
+        // 2. Solo comas presentes (ej: "2700,50", "2700,00", "25,50", "625,0", "900,5")
+        // La coma actúa exclusivamente como separador decimal
+        if (clean.contains(",")) {
+            clean = clean.replace(",", ".");
+            return Double.parseDouble(clean);
+        }
+
+        // 3. Solo puntos presentes (ej: "2.700", "1.250.000", "625.0", "900.5")
+        if (clean.contains(".")) {
+            long dotCount = clean.chars().filter(ch -> ch == '.').count();
+            if (dotCount > 1) {
+                // Múltiples puntos: ej: 1.250.000 o 1.250.000.50
+                int lastDot = clean.lastIndexOf('.');
+                String afterLastDot = clean.substring(lastDot + 1);
+                if (afterLastDot.length() != 3) {
+                    // Último punto es decimal
+                    String thousands = clean.substring(0, lastDot).replace(".", "");
+                    clean = thousands + "." + afterLastDot;
+                } else {
+                    // Todos los puntos son de miles
+                    clean = clean.replace(".", "");
+                }
+            } else {
+                // Un solo punto: ej: "2.700" vs "625.0" vs "15.50"
+                int dotIdx = clean.indexOf('.');
+                String integerPart = clean.substring(0, dotIdx);
+                String fractionPart = clean.substring(dotIdx + 1);
+                // Si tiene exactamente 3 dígitos tras el punto y no empieza con 0, es separador de miles (ej: 2.700 = 2700)
+                if (fractionPart.length() == 3 && !integerPart.equals("0")) {
+                    clean = integerPart + fractionPart;
+                }
+                // Si tiene 1 o 2 dígitos (ej: 625.0, 900.5, 15.50), se mantiene como decimal
+            }
+            return Double.parseDouble(clean);
+        }
+
+        // 4. Entero plano (ej: "2600", "25")
+        return Double.parseDouble(clean);
+    }
 
     // Pattern for a single color/variant token: LABEL ($PRICE)
     private static final Pattern VARIANT_TOKEN_PATTERN = Pattern
@@ -101,9 +159,8 @@ public class ProductService {
                         Matcher vm = VARIANT_TOKEN_PATTERN.matcher(segment.trim());
                         if (vm.find()) {
                             String label = vm.group("label").trim();
-                            String priceStr = vm.group("price").replace(",", ".");
                             try {
-                                double price = Double.parseDouble(priceStr);
+                                double price = parsePrice(vm.group("price"));
                                 variants.add(Product.builder()
                                         .name(lastBaseName + " " + label)
                                         .originalPriceUsd(price)
@@ -167,8 +224,7 @@ public class ProductService {
                     String name = productMatcher.group("name").trim();
                     // Ignoramos texto de cantidad y precio por mayor dentro de parentesis ej: (x 10 uni 22 uss) o (x 8 un 50uss)
                     name = name.replaceAll("(?i)\\s*\\(x\\s*\\d+\\s*un(?:i)?[^)]*\\)", "").trim();
-                    String priceStr = productMatcher.group("price").replace(",", ".");
-                    double price = Double.parseDouble(priceStr);
+                    Double price = parsePrice(productMatcher.group("price"));
 
                     // Build the note suffix, avoiding double-wrapping parentheses.
                     // Raw note examples: "(S/CARG)", "*S/CARG*", "BLUE / GREEN", "a$ 1410"
@@ -236,13 +292,12 @@ public class ProductService {
             }
 
             // Fallback: CSV (Name, Price, Category)
-            if (trimmedLine.contains(",") && !trimmedLine.startsWith("►") && !trimmedLine.startsWith("▪️")) {
+            if (trimmedLine.contains(",") && !trimmedLine.startsWith("►") && !trimmedLine.startsWith("▪️") && !trimmedLine.startsWith("▪")) {
                 String[] parts = trimmedLine.split(",");
                 if (parts.length >= 2) {
                     try {
                         String name = parts[0].trim();
-                        String pricePart = parts[1].trim().replace("$", "");
-                        Double price = Double.parseDouble(pricePart);
+                        Double price = parsePrice(parts[1].trim());
                         String category = parts.length > 2 ? parts[2].trim() : currentCategory;
 
                         Product product = Product.builder()
